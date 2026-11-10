@@ -234,6 +234,15 @@ class PacketCaptureSniffer:
         sha256_digest = hashlib.sha256(raw_pcap_bytes).hexdigest()
         short_sid = session_id[:8]
         file_name = f"session_{short_sid}_capture.pcap"
+        vault_root = os.getenv("FORENSICS_VAULT_PATH", self.VAULT_BASE_URI)
+        try:
+            from pathlib import Path
+
+            target_dir = Path(vault_root) / short_sid
+            target_dir.mkdir(parents=True, exist_ok=True)
+            (target_dir / file_name).write_bytes(raw_pcap_bytes)
+        except Exception:
+            pass
         storage_uri = f"file://{self.VAULT_BASE_URI.rstrip('/')}/{short_sid}/{file_name}"
 
         artifact = ForensicArtifactContract(

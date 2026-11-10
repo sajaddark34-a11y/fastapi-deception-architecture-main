@@ -404,6 +404,7 @@ class DecoyServiceApp:
 
         now_iso = datetime.now(timezone.utc).isoformat()
         response_headers = {
+            "X-Enterprise-Server-Node": f"prd-core-node-{binding.container_id[-6:]}",
             "X-Deception-Upstream-Target": "PREWARMED_SANDBOX",
             "X-Sandbox-Container-ID": binding.container_id,
             "X-Sandbox-Internal-IP": binding.container_internal_ip,
@@ -544,3 +545,14 @@ async def decoy_catch_all_route(request: Request, full_path: str) -> Response:
 
 
 app.include_router(decoy_router)
+
+if __name__ == "__main__":
+    import os as _os
+    import uvicorn as _uvicorn
+
+    _uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(_os.getenv("DECOY_SERVICE_PORT", "8080")),
+    )
+

@@ -80,6 +80,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
       CORE_WEB_APP_URL: http://core_web_app:8001
       SANDBOX_POOL_URL: http://isolation_sandbox:8080
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn deception_gateway.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       redis_store:
         condition: service_healthy
@@ -115,6 +118,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deception_sec_pass_2026}
       POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn core_web_app.main:app --host 0.0.0.0 --port 8001"
     depends_on:
       redis_store:
         condition: service_healthy
@@ -172,6 +178,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
       FORENSICS_VAULT_PATH: /var/forensics/artifacts
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn forensic_extraction_engine.engine_service:app --host 0.0.0.0 --port 8090"
     depends_on:
       redis_store:
         condition: service_healthy
@@ -207,6 +216,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
       FORENSICS_VAULT_PATH: /var/forensics/artifacts
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn soc_dashboard.dashboard_server:app --host 0.0.0.0 --port 8500"
     depends_on:
       redis_store:
         condition: service_healthy

@@ -389,6 +389,7 @@ async def soar_rotate_honey_tokens(
     }
 
 
+@visualization_router.websocket("/alerts/ws")
 async def handle_alerts_websocket(websocket: WebSocket) -> None:
     """
     WebSocket handler streaming live `SecurityAlertContract` snapshots and

@@ -375,3 +375,18 @@ class FastAlertsStream:
         finally:
             async with self._lock:
                 self._alert_subscribers.discard(queue)
+
+    async def ensure_consumer_group(self) -> bool:
+        """Ensure Redis stream consumer group or in-memory stream readiness."""
+        await self._get_client()
+        return True
+
+    async def close(self) -> None:
+        """Close the active Redis client connection if open."""
+        if self._redis_client is not None:
+            try:
+                await self._redis_client.close()
+            except Exception:
+                pass
+            self._redis_client = None
+

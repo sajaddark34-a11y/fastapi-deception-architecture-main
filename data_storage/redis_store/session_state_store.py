@@ -527,3 +527,13 @@ class SessionStateStore:
                 self._use_memory_fallback = True
                 return True
         return True
+
+    async def close(self) -> None:
+        """Close the active Redis client connection if open."""
+        if self._redis_client is not None:
+            try:
+                await self._redis_client.close()
+            except Exception:
+                pass
+            self._redis_client = None
+

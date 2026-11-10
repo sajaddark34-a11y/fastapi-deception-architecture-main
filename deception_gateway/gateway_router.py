@@ -351,12 +351,13 @@ async def process_gateway_request(
     cookies = dict(getattr(request, "cookies", {}) or {})
 
     client_obj = getattr(request, "client", None)
-    client_ip = (
+    direct_ip = (getattr(client_obj, "host", None) if client_obj else None) or "127.0.0.1"
+    trust_proxy = os.getenv("TRUST_PROXY_HEADERS", "true").lower() == "true"
+    forwarded_ip = (
         headers.get("X-Forwarded-For", "").split(",")[0].strip()
         or headers.get("X-Real-IP", "").strip()
-        or (getattr(client_obj, "host", None) if client_obj else None)
-        or "127.0.0.1"
-    )
+    ) if trust_proxy else ""
+    client_ip = forwarded_ip or direct_ip
     session_id = (
         headers.get("X-Session-ID")
         or headers.get("x-session-id")
