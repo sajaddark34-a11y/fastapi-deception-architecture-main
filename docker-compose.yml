@@ -1,0 +1,256 @@
+# ==============================================================================
+# FastAPI-Driven Deception Architecture for Threat Detection & Forensics Extraction
+# Phase 1: Multi-Layer Isolated Docker Infrastructure Specification
+# ==============================================================================
+
+name: fastapi-deception-architecture
+
+services:
+  # ----------------------------------------------------------------------------
+  # LAYER 4: DATA STORAGE & SOC BACKBONE SERVICES
+  # ----------------------------------------------------------------------------
+  redis_store:
+    image: redis:7-alpine
+    container_name: deception_redis_store
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_state_data:/data
+    networks:
+      - soc_data_backbone_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  postgresql_store:
+    image: postgres:16-alpine
+    container_name: deception_postgresql_store
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-deception_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deception_sec_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_forensics_data:/var/lib/postgresql/data
+      - forensic_artifacts_vault:/var/forensics/artifacts
+    networks:
+      - soc_data_backbone_net
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER:-deception_admin} -d $${POSTGRES_DB:-deception_forensics_db}"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # LAYER 1: INGRESS GATEWAY & TRAFFIC CLASSIFICATION
+  # ----------------------------------------------------------------------------
+  deception_gateway:
+    image: python:3.11-slim
+    container_name: deception_gateway_service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+    ports:
+      - "${GATEWAY_PORT:-8000}:8000"
+    environment:
+      SERVICE_NAME: deception_gateway
+      PYTHONPATH: /app
+      REDIS_HOST: redis_store
+      REDIS_PORT: "6379"
+      REDIS_URL: redis://redis_store:6379/0
+      POSTGRES_HOST: postgresql_store
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-deception_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deception_sec_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
+      CORE_WEB_APP_URL: http://core_web_app:8001
+      SANDBOX_POOL_URL: http://isolation_sandbox:8080
+    depends_on:
+      redis_store:
+        condition: service_healthy
+      postgresql_store:
+        condition: service_healthy
+    networks:
+      - ingress_gateway_net
+      - sandbox_containment_net
+      - soc_data_backbone_net
+
+  # ----------------------------------------------------------------------------
+  # LAYER 2: CORE WEB APPLICATION & HONEY TOKEN INJECTION
+  # ----------------------------------------------------------------------------
+  core_web_app:
+    image: python:3.11-slim
+    container_name: core_web_app_service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+    expose:
+      - "8001"
+    environment:
+      SERVICE_NAME: core_web_app
+      PYTHONPATH: /app
+      HONEY_TOKEN_INJECTOR_ENABLED: "true"
+      REDIS_HOST: redis_store
+      REDIS_PORT: "6379"
+      REDIS_URL: redis://redis_store:6379/0
+      POSTGRES_HOST: postgresql_store
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-deception_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deception_sec_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
+    depends_on:
+      redis_store:
+        condition: service_healthy
+      postgresql_store:
+        condition: service_healthy
+    networks:
+      - ingress_gateway_net
+      - soc_data_backbone_net
+
+  # ----------------------------------------------------------------------------
+  # LAYER 3: ISOLATION SANDBOX & FORENSIC EXTRACTION ENGINE
+  # ----------------------------------------------------------------------------
+  isolation_sandbox:
+    build:
+      context: ./isolation_sandbox/isolated_honey_containers
+      dockerfile: Dockerfile
+    image: deception-honey-sandbox:latest
+    container_name: isolation_sandbox_service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app:ro
+    expose:
+      - "8080"
+    environment:
+      SERVICE_NAME: isolation_sandbox
+      PYTHONPATH: /app
+      SANDBOX_CONTAINMENT_MODE: strict_internal
+      DECOY_SERVICE_PORT: "8080"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - sandbox_containment_net
+
+  forensic_extraction_engine:
+    image: python:3.11-slim
+    container_name: forensic_extraction_engine_service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - forensic_artifacts_vault:/var/forensics/artifacts
+    environment:
+      SERVICE_NAME: forensic_extraction_engine
+      PYTHONPATH: /app
+      REDIS_HOST: redis_store
+      REDIS_PORT: "6379"
+      REDIS_URL: redis://redis_store:6379/0
+      POSTGRES_HOST: postgresql_store
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-deception_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deception_sec_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
+      FORENSICS_VAULT_PATH: /var/forensics/artifacts
+    depends_on:
+      redis_store:
+        condition: service_healthy
+      postgresql_store:
+        condition: service_healthy
+    networks:
+      - sandbox_containment_net
+      - soc_data_backbone_net
+
+  # ----------------------------------------------------------------------------
+  # LAYER 4: DEFENDER SOC DASHBOARD & INCIDENT REPORTING
+  # ----------------------------------------------------------------------------
+  soc_dashboard:
+    image: python:3.11-slim
+    container_name: soc_dashboard_service
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - forensic_artifacts_vault:/var/forensics/artifacts:ro
+    ports:
+      - "${SOC_DASHBOARD_PORT:-8500}:8500"
+    environment:
+      SERVICE_NAME: soc_dashboard
+      PYTHONPATH: /app
+      REDIS_HOST: redis_store
+      REDIS_PORT: "6379"
+      REDIS_URL: redis://redis_store:6379/0
+      POSTGRES_HOST: postgresql_store
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-deception_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deception_sec_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-deception_forensics_db}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-deception_admin}:${POSTGRES_PASSWORD:-deception_sec_pass_2026}@postgresql_store:5432/${POSTGRES_DB:-deception_forensics_db}
+      FORENSICS_VAULT_PATH: /var/forensics/artifacts
+    depends_on:
+      redis_store:
+        condition: service_healthy
+      postgresql_store:
+        condition: service_healthy
+    networks:
+      - soc_data_backbone_net
+
+# ==============================================================================
+# ARCHITECTURAL NETWORK ISOLATION TOPOLOGY
+# ==============================================================================
+networks:
+  # 1. Ingress & Legitimate App Network: Connects Deception Gateway with Core Web App & Honey Token Injector
+  ingress_gateway_net:
+    name: ingress_gateway_net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+  # 2. Sandbox Containment Network: Strictly internal air-gapped network preventing internet or production DB access
+  sandbox_containment_net:
+    name: sandbox_containment_net
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+  # 3. SOC & Data Backbone Network: Connects Gateway, Forensic Extraction Engine, Data Storage (Redis & PostgreSQL), and SOC Dashboard
+  soc_data_backbone_net:
+    name: soc_data_backbone_net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+# ==============================================================================
+# PERSISTENT DATA & FORENSICS VOLUMES
+# ==============================================================================
+volumes:
+  redis_state_data:
+    name: deception_redis_state_data
+  postgres_forensics_data:
+    name: deception_postgres_forensics_data
+  forensic_artifacts_vault:
+    name: deception_forensic_artifacts_vault
