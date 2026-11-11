@@ -13,7 +13,10 @@ from fastapi.testclient import TestClient
 
 from core_web_app.main import app as core_app
 from deception_gateway.main import app as gateway_app
-from forensic_extraction_engine.engine_service import forensic_engine_service
+from forensic_extraction_engine.engine_service import (
+    app as forensic_app,
+    forensic_engine_service,
+)
 from isolation_sandbox.isolated_honey_containers.decoy_service_app import (
     decoy_service_instance,
 )
@@ -150,3 +153,14 @@ def test_layer3_and_layer4_forensics_custody_and_soc_dashboard() -> None:
             )
             assert export_resp.status_code == 200
             assert export_resp.json()["cryptographic_proof"]["chain_of_custody_valid"] is True
+
+        # 5. Verify Forensic Extraction Engine FastAPI microservice endpoints directly
+        with TestClient(forensic_app) as f_client:
+            fh_resp = f_client.get("/forensics/health")
+            assert fh_resp.status_code == 200
+            assert fh_resp.json()["sandbox_hook_attached"] is True
+
+            tl_resp = f_client.get(f"/forensics/sessions/{trapped_sid}/timeline")
+            assert tl_resp.status_code == 200
+            assert tl_resp.json()["total_timeline_events"] >= 2
+

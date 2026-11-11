@@ -325,6 +325,28 @@ class MaliciousSessionRouter:
                     exc,
                 )
 
+        try:
+            from forensic_extraction_engine.engine_service import (
+                forensic_engine_service,
+            )
+            from isolation_sandbox.isolated_honey_containers.decoy_service_app import (
+                decoy_service_instance,
+            )
+
+            forensic_engine_service.attach_sandbox_telemetry_hook()
+            await decoy_service_instance.handle_trapped_request(
+                session_id=session.session_id,
+                client_ip=session.client_ip,
+                request_method=request_method,
+                request_path=norm_path,
+                headers=headers,
+                query_params=query_params,
+                body_bytes=body_bytes,
+                preferred_container_id=binding.container_id,
+            )
+        except Exception as exc:
+            logger.debug("In-process decoy telemetry hook skipped: %s", exc)
+
         return self._build_decoy_fallback_payload(
             session=session,
             binding=binding,
