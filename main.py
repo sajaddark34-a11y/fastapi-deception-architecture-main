@@ -8,6 +8,8 @@ and Unprotected Defender SOC Command Center (`/admin/soc`).
 from __future__ import annotations
 
 import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -15,6 +17,13 @@ from fastapi import FastAPI, Form, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from data_storage.postgresql_store import forensic_logs_repository
+from data_storage.redis_store import fast_alerts_stream
+from shared_contracts.alert_schema import (
+    AlertSeverityEnum,
+    AttackCategoryEnum,
+    SecurityAlertContract,
+)
 from soc_dashboard.attack_visualizations.telemetry_chart_view import (
     telemetry_chart_view,
 )
@@ -62,7 +71,26 @@ async def post_search_trap(
 
     print(f"[WEB TRAP] SQLi/Search attempt from IP {ip}. Payload: {search_query}")
 
-    # TODO: Insert existing Redis logging function here
+    # Emit real-time deception alert to Redis Streams and PostgreSQL logs
+    try:
+        session_id = request.headers.get("X-Session-ID") or f"sess_trap_{uuid.uuid4().hex[:8]}"
+        alert = SecurityAlertContract(
+            alert_id=f"alt_trap_{uuid.uuid4().hex[:12]}",
+            timestamp=datetime.now(timezone.utc),
+            severity=AlertSeverityEnum.HIGH,
+            category=AttackCategoryEnum.HONEY_TOKEN_TRIGGERED,
+            source_ip=ip if ip != "testclient" else "127.0.0.1",
+            session_id=session_id,
+            target_endpoint="/search_trap",
+            http_method="POST",
+            action_taken="LOGGED_AND_DECEIVED",
+            summary_message=f"E-Commerce search honeypot triggered by {ip}: payload '{search_query[:120]}'",
+            raw_headers_snapshot=dict(request.headers),
+        )
+        await fast_alerts_stream.publish_alert(alert)
+        await forensic_logs_repository.save_security_alert(alert)
+    except Exception as exc:
+        print(f"[WEB TRAP] Warning: Failed to publish trap alert to storage: {exc}")
 
     fake_message = f"No results found for: {search_query}"
     return templates.TemplateResponse(
