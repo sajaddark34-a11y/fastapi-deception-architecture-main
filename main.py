@@ -1,92 +1,92 @@
 """
 Main FastAPI Application Entry Point (`main.py`).
 
-Provides the Web-Level Honeypot & Decoy Login Portal (`/login`),
-authenticated redirect to Defender SOC Command Center (`/admin/soc`),
-and integrates with the 4-layer Deception Architecture.
+Provides the E-Commerce Web Trap Storefront (`/`), Search Trap Endpoint (`/search_trap`),
+and Unprotected Defender SOC Command Center (`/admin/soc`).
 """
 
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import FastAPI, Form, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from soc_dashboard.dashboard_server import app as soc_app
+from soc_dashboard.attack_visualizations.telemetry_chart_view import (
+    telemetry_chart_view,
+)
+from soc_dashboard.dashboard_server import (
+    dashboard_core_router,
+    report_export_router,
+    soc_dashboard_lifespan,
+    visualization_router,
+)
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# Use the established SOC Dashboard application instance
-app = soc_app
+# Create the primary application instance
+app = FastAPI(
+    title="Defender SOC Command Center & E-Commerce Web Trap",
+    version="1.0.0",
+    lifespan=soc_dashboard_lifespan,
+)
 
 
-@app.get("/login", response_class=HTMLResponse)
-async def get_honeypot_login(request: Request):
-    """Serve the decoy corporate login portal to trap web crawlers/adversaries."""
+@app.get("/", response_class=HTMLResponse)
+async def get_ecommerce_store(request: Request):
+    """Serve the E-commerce Web Trap storefront (templates/index.html)."""
     return templates.TemplateResponse(
         request=request,
-        name="fake_login.html",
-        context={"error": None},
+        name="index.html",
+        context={"message": None, "search_query": ""},
     )
 
 
-@app.post("/login")
-async def post_honeypot_login(
+@app.post("/search_trap", response_class=HTMLResponse)
+async def post_search_trap(
     request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
+    search_query: str = Form(""),
 ):
     """
-    Inspect login credentials:
-    - Legitimate admin credentials -> Redirect to SOC dashboard route (/admin/soc).
-    - Attacker credentials -> Log SOC alert, harvest payload, and maintain deception.
+    E-Commerce Search Honeypot Trap:
+    Captures search/SQLi payloads, logs attacker telemetry, and maintains deception.
     """
-    # Check if credentials match hardcoded admin
-    if username == "sajad_admin" and password == "Soc@2026":
-        return RedirectResponse(url="/admin/soc", status_code=status.HTTP_303_SEE_OTHER)
-
-    # Attacker / Honeypot Trigger
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    ip = request.client.host if request.client else "127.0.0.1"
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
+        ip = forwarded_for.split(",")[0].strip()
 
-    soc_alert: Dict[str, Any] = {
-        "event_type": "WEB_HONEYPOT_CREDENTIAL_HARVEST",
-        "severity": "HIGH",
-        "source_ip": client_ip,
-        "captured_username": username,
-        "captured_password": password,
-        "target_endpoint": "/login",
-        "user_agent": request.headers.get("user-agent", "Unknown"),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "action_taken": "CREDENTIALS_HARVESTED_DECEPTION_MAINTAINED",
-    }
+    print(f"[WEB TRAP] SQLi/Search attempt from IP {ip}. Payload: {search_query}")
 
-    # TODO: Insert Redis Logging here
-    # Example:
-    # await redis_client.xadd("deception:streams:alerts", {"payload": json.dumps(soc_alert)})
-    # or:
-    # await fast_alerts_stream.publish_alert(soc_alert)
+    # TODO: Insert existing Redis logging function here
 
+    fake_message = f"No results found for: {search_query}"
     return templates.TemplateResponse(
         request=request,
-        name="fake_login.html",
-        context={"error": "Invalid credentials. Incident logged."},
+        name="index.html",
+        context={
+            "message": fake_message,
+            "search_query": search_query,
+        },
         status_code=status.HTTP_200_OK,
     )
 
 
 @app.get("/admin/soc", response_class=HTMLResponse)
-async def admin_soc_dashboard(request: Request):
-    """Authenticated entry point redirecting to the Defender SOC Command Center."""
-    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+async def get_open_soc_dashboard(request: Request):
+    """Unprotected, direct entry point returning the SOC dashboard template."""
+    html_content = await telemetry_chart_view.render_enterprise_soc_html()
+    return HTMLResponse(content=html_content, status_code=200)
+
+
+# Include SOC subsystems and routers
+app.include_router(dashboard_core_router)
+app.include_router(visualization_router)
+app.include_router(report_export_router)
 
 
 if __name__ == "__main__":

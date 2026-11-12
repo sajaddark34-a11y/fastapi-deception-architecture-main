@@ -125,7 +125,7 @@ from isolation_sandbox.isolated_honey_containers.decoy_service_app import (  # n
 from isolation_sandbox.prewarmed_dynamic_sandbox import (  # noqa: E402
     prewarmed_pool_controller,
 )
-from soc_dashboard.dashboard_server import app as soc_app  # noqa: E402
+from main import app as soc_app  # noqa: E402
 
 
 def _get_lan_ip() -> str:
@@ -165,8 +165,8 @@ def _print_startup_banner(
   [Layer 3] Isolation Honey Sandbox      : http://{display_host}:{sandbox_port}/docs
             Forensic Extraction Engine   : http://{display_host}:{forensic_port}/docs
 
-  [Layer 4] Defender SOC Command Center  : http://{display_host}:{soc_port}
-            SOC Dashboard Swagger UI     : http://{display_host}:{soc_port}/docs
+  [Layer 4] Web Trap (E-Commerce Store)  : http://{display_host}:{soc_port}/
+            Defender SOC Command Center  : http://{display_host}:{soc_port}/admin/soc
             SOC Health Check             : http://{display_host}:{soc_port}/health
 --------------------------------------------------------------------------------
   DEFAULT CREDENTIALS (Legitimate Core App Login):
@@ -269,10 +269,9 @@ async def run_all_layers() -> None:
         if os.getenv("AUTO_OPEN_BROWSER", "true").lower() in ("0", "false", "no"):
             return
         try:
-            # Open Layer 4 SOC Command Center Dashboard GUI, Decoy Login Portal, and Gateway Swagger UI
-            webbrowser.open(f"http://{check_host}:{soc_port}")
-            webbrowser.open_new_tab(f"http://{check_host}:{soc_port}/login")
-            webbrowser.open_new_tab(f"http://{check_host}:{gateway_port}/docs")
+            # Open EXACTLY: The Trap (/) and The Open Dashboard (/admin/soc)
+            webbrowser.open(f"http://{check_host}:{soc_port}/")
+            webbrowser.open_new_tab(f"http://{check_host}:{soc_port}/admin/soc")
         except Exception:
             pass
 

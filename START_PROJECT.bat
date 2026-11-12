@@ -99,7 +99,7 @@ echo         [INFO] Auto-Detecting Redis / PostgreSQL / Docker [Built-in High-Sp
 
 echo.
 echo [STEP 5/5] Launching All 5 FastAPI Services Across Layers 1-4...
-echo         The SOC Command Center Dashboard [http://127.0.0.1:8500] will open in your browser automatically.
+echo         The Web Trap [http://127.0.0.1:8500/] and SOC Dashboard [http://127.0.0.1:8500/admin/soc] will open automatically.
 echo         Press CTRL+C at any time to stop the servers.
 echo.
 

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberTech Enterprise Store - Secure Hardware & Cloud Systems</title>
+    <!-- Bootstrap 5 CSS CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0b1120;
+            color: #f1f5f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+        }
+        .navbar {
+            background-color: #0f172a;
+            border-bottom: 1px solid #1e293b;
+        }
+        .hero-section {
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            border-bottom: 1px solid #312e81;
+            padding: 4rem 1rem;
+        }
+        .card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px -10px rgba(14, 165, 233, 0.3);
+            border-color: #0ea5e9;
+        }
+        .badge-spec {
+            background-color: rgba(14, 165, 233, 0.15);
+            color: #38bdf8;
+            font-weight: 600;
+        }
+        .form-control-dark {
+            background-color: #0b1120;
+            border: 1px solid #334155;
+            color: #f8fafc;
+        }
+        .form-control-dark:focus {
+            background-color: #0b1120;
+            border-color: #0ea5e9;
+            color: #f8fafc;
+            box-shadow: 0 0 0 0.2rem rgba(14, 165, 233, 0.25);
+        }
+        footer {
+            background-color: #0f172a;
+            border-top: 1px solid #1e293b;
+            padding: 2rem 0;
+            margin-top: 5rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Navigation Bar with Embedded Search Trap -->
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top px-3">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/">
+                <span class="badge bg-primary p-2">CT</span>
+                <span>CyberTech Systems</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navContent">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navContent">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item"><a class="nav-link active" href="/">Storefront</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#">Enterprise Hardware</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#">Security Appliances</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#">Cloud Infrastructure</a></li>
+                </ul>
+
+                <!-- THE TRAP: E-Commerce Search Bar Form -->
+                <form class="d-flex" method="POST" action="/search_trap" style="min-width: 340px;">
+                    <div class="input-group">
+                        <input class="form-control form-control-dark" type="search" name="search_query" placeholder="Search servers, exploits, firmware..." value="{{ search_query if search_query else '' }}" required autocomplete="off">
+                        <button class="btn btn-outline-info" type="submit">Search</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Trap Response Feedback Section -->
+    {% if message %}
+    <div class="container mt-4">
+        <div class="alert alert-warning alert-dismissible fade show d-flex align-items-center gap-2 shadow-sm" role="alert">
+            <svg class="bi flex-shrink-0" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zm.01-8.5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5a.5.5 0 0 1 .5-.5z"/>
+            </svg>
+            <div><strong>Store Catalog:</strong> {{ message }}</div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Hero Section -->
+    <section class="hero-section text-center">
+        <div class="container">
+            <h1 class="display-5 fw-bold mb-3">Enterprise Defense & Cloud Hardware</h1>
+            <p class="lead text-secondary mx-auto mb-4" style="max-width: 700px;">
+                High-assurance servers, cryptographic hardware security modules, and air-gapped forensic appliances engineered for zero-trust architectures.
+            </p>
+            <div class="d-flex justify-content-center gap-3">
+                <a href="#products" class="btn btn-primary px-4 py-2">Browse Catalog</a>
+                <a href="/admin/soc" class="btn btn-outline-secondary px-4 py-2">SOC Telemetry View</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Product Grid: 4 Dummy Tech Products -->
+    <div class="container py-5" id="products">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3 class="fw-bold mb-0">Featured Enterprise Gear</h3>
+            <span class="text-secondary small">Showing 4 of 4 Verified Hardware Units</span>
+        </div>
+
+        <div class="row g-4">
+            <!-- Product 1 -->
+            <div class="col-12 col-md-6 col-lg-3">
+                <div class="card h-100 p-3">
+                    <div class="card-body d-flex flex-column">
+                        <span class="badge badge-spec align-self-start mb-2">Cryptographic HSM</span>
+                        <h5 class="card-title fw-bold">QuantumShield HSM-9000</h5>
+                        <p class="card-text text-secondary small flex-grow-1">
+                            FIPS 140-3 Level 4 hardware security module with physical tamper-zeroization and quantum-safe key storage.
+                        </p>
+                        <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top border-secondary border-opacity-25">
+                            <span class="fs-5 fw-bold text-info">$14,850</span>
+                            <button class="btn btn-sm btn-outline-light" onclick="alert('Order request queued to enterprise logistics.')">Inquire</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 2 -->
+            <div class="col-12 col-md-6 col-lg-3">
+                <div class="card h-100 p-3">
+                    <div class="card-body d-flex flex-column">
+                        <span class="badge badge-spec align-self-start mb-2">Network Appliance</span>
+                        <h5 class="card-title fw-bold">OpticTap 100GbE Capture</h5>
+                        <p class="card-text text-secondary small flex-grow-1">
+                            Passive zero-loss optical tap appliance for lossless full-duplex packet capture and line-rate DFIR telemetry streaming.
+                        </p>
+                        <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top border-secondary border-opacity-25">
+                            <span class="fs-5 fw-bold text-info">$8,200</span>
+                            <button class="btn btn-sm btn-outline-light" onclick="alert('Order request queued to enterprise logistics.')">Inquire</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 3 -->
+            <div class="col-12 col-md-6 col-lg-3">
+                <div class="card h-100 p-3">
+                    <div class="card-body d-flex flex-column">
+                        <span class="badge badge-spec align-self-start mb-2">Air-Gapped Node</span>
+                        <h5 class="card-title fw-bold">TitanSecure Vault Node</h5>
+                        <p class="card-text text-secondary small flex-grow-1">
+                            Dual AMD EPYC 9654 workstation with Faraday shielding and hardware-isolated write-blockers for cleanroom forensic analysis.
+                        </p>
+                        <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top border-secondary border-opacity-25">
+                            <span class="fs-5 fw-bold text-info">$22,400</span>
+                            <button class="btn btn-sm btn-outline-light" onclick="alert('Order request queued to enterprise logistics.')">Inquire</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 4 -->
+            <div class="col-12 col-md-6 col-lg-3">
+                <div class="card h-100 p-3">
+                    <div class="card-body d-flex flex-column">
+                        <span class="badge badge-spec align-self-start mb-2">Perimeter Edge</span>
+                        <h5 class="card-title fw-bold">GateGuard L4-L7 Deception</h5>
+                        <p class="card-text text-secondary small flex-grow-1">
+                            High-throughput asynchronous proxy hardware with sub-millisecond dynamic routing and prewarmed honey-container clustering.
+                        </p>
+                        <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top border-secondary border-opacity-25">
+                            <span class="fs-5 fw-bold text-info">$11,900</span>
+                            <button class="btn btn-sm btn-outline-light" onclick="alert('Order request queued to enterprise logistics.')">Inquire</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Corporate Footer -->
+    <footer class="text-center text-secondary small">
+        <div class="container">
+            <p class="mb-1">&copy; 2026 CyberTech Systems Inc. Enterprise Defense Solutions.</p>
+            <p class="mb-0 text-muted" style="font-size: 11px;">All transactions and search interactions are cryptographically verified and recorded.</p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap 5 JS Bundle CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
