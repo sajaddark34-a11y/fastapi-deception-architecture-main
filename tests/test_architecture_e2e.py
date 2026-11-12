@@ -164,3 +164,43 @@ def test_layer3_and_layer4_forensics_custody_and_soc_dashboard() -> None:
             assert tl_resp.status_code == 200
             assert tl_resp.json()["total_timeline_events"] >= 2
 
+
+def test_tcp_l4_nmap_scan_detection_and_realtime_soc_websocket() -> None:
+    """
+    Verify that raw TCP L4 port scans (`nmap -sS` / `nmap -sT` / `nmap -sV`) are
+    captured by `attack_detector.inspect_tcp_l4_scan`, logged as MITRE ATT&CK `T1046`
+    in the Forensic Extraction Engine, and streamed via the SOC WebSocket endpoint.
+    """
+    import asyncio
+    from deception_gateway.main import attack_detector
+
+    alert = asyncio.run(
+        attack_detector.inspect_tcp_l4_scan(
+            client_ip="10.0.2.15",
+            client_port=54321,
+            destination_port=8000,
+            raw_probe_bytes=b"",
+            scan_type="TCP_L4_PORT_SCAN",
+        )
+    )
+    assert alert is not None
+    assert alert.category.value == "AUTOMATED_SCANNER_PROBE"
+    assert alert.source_ip == "10.0.2.15"
+
+    with TestClient(soc_app) as soc_client:
+        ui_resp = soc_client.get("/")
+        assert "/api/v1/soc/visualizations/alerts/ws" in ui_resp.text
+
+        live_resp = soc_client.get("/api/v1/soc/visualizations/alerts/live?limit=10")
+        assert live_resp.status_code == 200
+        alerts_list = live_resp.json()["alerts"]
+        assert any(a["alert_id"] == alert.alert_id for a in alerts_list)
+
+        mitre_resp = soc_client.get("/api/v1/soc/visualizations/mitre-matrix")
+        assert mitre_resp.status_code == 200
+        technique_ids = [
+            t["technique_id"] for t in mitre_resp.json()["techniques_matrix"]
+        ]
+        assert "T1046" in technique_ids
+
+

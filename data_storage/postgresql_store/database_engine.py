@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 try:
@@ -90,10 +92,20 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
+def _is_pg_reachable(host: str, port: int, timeout: float = 0.25) -> bool:
+    """Return True if PostgreSQL `host:port` accepts a TCP connection."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 def build_forensic_database_url() -> str:
     """
     Construct the asynchronous PostgreSQL database connection URL from environment
-    variables defined in `docker-compose.yml`.
+    variables defined in `docker-compose.yml`, falling back to `sqlite+aiosqlite`
+    when an external PostgreSQL server is offline.
     """
     explicit_url = os.getenv("DATABASE_URL")
     if explicit_url:
@@ -101,10 +113,22 @@ def build_forensic_database_url() -> str:
 
     pg_user = os.getenv("POSTGRES_USER", "deception_admin")
     pg_password = os.getenv("POSTGRES_PASSWORD", "deception_sec_pass_2026")
-    pg_host = os.getenv("POSTGRES_HOST", "postgresql_store")
+    pg_host = os.getenv("POSTGRES_HOST", "127.0.0.1")
     pg_port = os.getenv("POSTGRES_PORT", "5432")
     pg_db = os.getenv("POSTGRES_DB", "deception_forensics_db")
-    return f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+
+    if _is_pg_reachable(pg_host, int(pg_port)):
+        return f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+
+    try:
+        import aiosqlite  # noqa: F401
+
+        sqlite_dir = Path(__file__).resolve().parents[2] / "artifacts_vault"
+        sqlite_dir.mkdir(parents=True, exist_ok=True)
+        sqlite_path = (sqlite_dir / "forensic_store.db").as_posix()
+        return f"sqlite+aiosqlite:///{sqlite_path}"
+    except ImportError:
+        return f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
 
 
 FORENSIC_DATABASE_URL: str = build_forensic_database_url()

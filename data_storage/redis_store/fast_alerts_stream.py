@@ -30,6 +30,12 @@ except ImportError:  # pragma: no cover
     class RedisError(Exception):  # type: ignore[no-redef]
         """Fallback exception when redis package is unavailable."""
 
+from data_storage.redis_store.session_state_store import (
+    _SHARED_FAKE_REDIS_SERVER,
+    _is_redis_tcp_open,
+    fake_aioredis,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -85,30 +91,46 @@ class FastAlertsStream:
         self._telemetry_subscribers: Set[asyncio.Queue[TelemetryStreamEnvelope]] = set()
 
     async def _get_client(self) -> Optional["aioredis.Redis"]:
-        """Return an active Redis async client or fall back to in-memory structures."""
+        """Return an active Redis async client (or embedded FakeRedis server when external Redis is offline)."""
         if self._use_memory_fallback or aioredis is None:
             return None
 
         if self._redis_client is None:
-            try:
-                client = aioredis.from_url(
-                    self._redis_url,
-                    encoding="utf-8",
-                    decode_responses=True,
-                    socket_connect_timeout=1.5,
-                    socket_timeout=1.5,
-                )
-                await client.ping()
-                self._redis_client = client
-            except Exception as exc:
-                logger.warning(
-                    "Redis unreachable at %s (%s). Switching FastAlertsStream to in-memory fallback.",
-                    self._redis_url,
-                    exc,
-                )
-                self._use_memory_fallback = True
-                self._redis_client = None
-                return None
+            host = os.getenv("REDIS_HOST", "127.0.0.1")
+            port = int(os.getenv("REDIS_PORT", "6379"))
+            if _is_redis_tcp_open(host, port):
+                try:
+                    client = aioredis.from_url(
+                        self._redis_url,
+                        encoding="utf-8",
+                        decode_responses=True,
+                        socket_connect_timeout=1.0,
+                        socket_timeout=1.0,
+                    )
+                    await client.ping()
+                    self._redis_client = client
+                    return self._redis_client
+                except Exception:
+                    pass
+
+            if fake_aioredis is not None and _SHARED_FAKE_REDIS_SERVER is not None:
+                try:
+                    client = fake_aioredis.FakeRedis(
+                        server=_SHARED_FAKE_REDIS_SERVER,
+                        decode_responses=True,
+                    )
+                    await client.ping()
+                    self._redis_client = client
+                    logger.info(
+                        "FastAlertsStream connected to embedded async Redis engine (FakeRedis)."
+                    )
+                    return self._redis_client
+                except Exception:
+                    pass
+
+            self._use_memory_fallback = True
+            self._redis_client = None
+            return None
 
         return self._redis_client
 
@@ -341,30 +363,6 @@ class FastAlertsStream:
         are published, suitable for streaming over WebSockets or Server-Sent Events (SSE)
         in the Defender SOC Dashboard.
         """
-        client = await self._get_client()
-        if client is not None:
-            pubsub = client.pubsub()
-            try:
-                await pubsub.subscribe(self.ALERTS_PUBSUB_CHANNEL)
-                async for message in pubsub.listen():
-                    if message and message.get("type") == "message":
-                        data = message.get("data")
-                        if isinstance(data, str) and data:
-                            yield SecurityAlertContract.model_validate_json(data)
-                return
-            except (RedisError, OSError) as exc:
-                logger.warning(
-                    "Redis Pub/Sub interrupted (%s); switching subscriber to memory queue.",
-                    exc,
-                )
-                self._use_memory_fallback = True
-            finally:
-                try:
-                    await pubsub.unsubscribe(self.ALERTS_PUBSUB_CHANNEL)
-                    await pubsub.close()
-                except Exception:
-                    pass
-
         queue: asyncio.Queue[SecurityAlertContract] = asyncio.Queue(maxsize=256)
         async with self._lock:
             self._alert_subscribers.add(queue)

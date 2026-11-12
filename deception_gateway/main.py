@@ -8,10 +8,17 @@ tables, and prepare `HoneyTokenInjectorMiddleware`, and mounts `gateway_router`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
+
+try:
+    from uvicorn.protocols.http.h11_impl import H11Protocol as _BaseHttpProtocol
+except ImportError:  # pragma: no cover
+    _BaseHttpProtocol = asyncio.Protocol  # type: ignore[assignment]
 
 try:
     from fastapi import FastAPI, HTTPException, Request, status
@@ -117,6 +124,118 @@ async def gateway_unhandled_exception_handler(
 
 app.include_router(gateway_router)
 
+_L4_SCAN_DETECTION_ARMED: bool = False
+_HTTP_METHOD_PREFIXES: tuple[bytes, ...] = (
+    b"GET ",
+    b"POST ",
+    b"PUT ",
+    b"DELETE ",
+    b"HEAD ",
+    b"OPTIONS ",
+    b"PATCH ",
+    b"TRACE ",
+    b"CONNECT ",
+    b"PRI * ",
+)
+
+
+def arm_l4_scan_detection(armed: bool = True) -> None:
+    """Enable or disable L4 raw TCP port-scan telemetry after startup readiness probes complete."""
+    global _L4_SCAN_DETECTION_ARMED
+    _L4_SCAN_DETECTION_ARMED = armed
+
+
+class TCPL4DeceptionProtocol(_BaseHttpProtocol):  # type: ignore[misc]
+    """
+    Transport-Layer (L4) TCP Deception Protocol Wrapper around Uvicorn's HTTP Protocol.
+
+    Intercepts:
+      1. Zero-byte TCP handshakes (`nmap -sS` via NAT / `nmap -sT` / `nc -zv` port scans)
+         that close (`FIN`/`RST`) before transmitting an HTTP request.
+      2. Raw non-HTTP service discovery probes (`nmap -sV` NULL/Help/GenericLines/SSL/RPC/RTSP probes)
+         that would otherwise be dropped silently by the HTTP parser before reaching FastAPI.
+    Forwards all captured L4 events directly to `attack_detector.inspect_tcp_l4_scan()`
+    and the `ForensicExtractionEngine` (`T1046`).
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._l4_client_ip: str = "127.0.0.1"
+        self._l4_client_port: int = 0
+        self._l4_dest_port: int = 8000
+        self._l4_bytes_received: int = 0
+        self._l4_probe_logged: bool = False
+        self._l4_connected_at: float = 0.0
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        peername = transport.get_extra_info("peername")
+        if isinstance(peername, (tuple, list)) and len(peername) >= 2:
+            self._l4_client_ip = str(peername[0])
+            self._l4_client_port = int(peername[1])
+        sockname = transport.get_extra_info("sockname")
+        if isinstance(sockname, (tuple, list)) and len(sockname) >= 2:
+            self._l4_dest_port = int(sockname[1])
+        self._l4_bytes_received = 0
+        self._l4_probe_logged = False
+        self._l4_connected_at = time.monotonic()
+        super().connection_made(transport)
+
+    def data_received(self, data: bytes) -> None:
+        is_first_chunk = self._l4_bytes_received == 0
+        self._l4_bytes_received += len(data)
+
+        if is_first_chunk and data and not self._l4_probe_logged:
+            upper_prefix = data[:16].upper()
+            is_standard_http = any(
+                upper_prefix.startswith(prefix) for prefix in _HTTP_METHOD_PREFIXES
+            )
+            is_nmap_rtsp_or_raw = b"RTSP/1.0" in data[:64].upper() or not is_standard_http
+            if is_nmap_rtsp_or_raw:
+                self._l4_probe_logged = True
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(
+                        attack_detector.inspect_tcp_l4_scan(
+                            client_ip=self._l4_client_ip,
+                            client_port=self._l4_client_port,
+                            destination_port=self._l4_dest_port,
+                            raw_probe_bytes=bytes(data[:128]),
+                            scan_type="NMAP_SERVICE_VERSION_PROBE",
+                        )
+                    )
+                except RuntimeError:
+                    pass
+
+        super().data_received(data)
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        super().connection_lost(exc)
+        elapsed = time.monotonic() - self._l4_connected_at
+        is_loopback_idle_preconnect = (
+            self._l4_client_ip in ("127.0.0.1", "::1") and elapsed >= 0.20
+        )
+        if (
+            _L4_SCAN_DETECTION_ARMED
+            and self._l4_bytes_received == 0
+            and not self._l4_probe_logged
+            and not is_loopback_idle_preconnect
+        ):
+            self._l4_probe_logged = True
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    attack_detector.inspect_tcp_l4_scan(
+                        client_ip=self._l4_client_ip,
+                        client_port=self._l4_client_port,
+                        destination_port=self._l4_dest_port,
+                        raw_probe_bytes=b"",
+                        scan_type="TCP_L4_PORT_SCAN",
+                    )
+                )
+            except RuntimeError:
+                pass
+
+
 __all__ = [
     "app",
     "gateway_lifespan",
@@ -125,4 +244,6 @@ __all__ = [
     "attack_detector",
     "traffic_classifier",
     "malicious_session_router",
+    "TCPL4DeceptionProtocol",
+    "arm_l4_scan_detection",
 ]

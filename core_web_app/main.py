@@ -95,7 +95,7 @@ except ImportError:  # pragma: no cover
 from core_web_app.authentication.auth_routes import auth_router
 from core_web_app.database_connector.connection import core_db_engine
 from core_web_app.database_connector.session_manager import init_and_seed_core_db
-from core_web_app.legitimate_request_routes import legitimate_router
+from core_web_app.legitimate_request_routes import health_check, legitimate_router
 
 logger = logging.getLogger(__name__)
 
@@ -191,3 +191,17 @@ async def standardized_unhandled_exception_handler(
 
 app.include_router(auth_router)
 app.include_router(legitimate_router)
+
+
+@app.get("/", tags=["Core Enterprise Operations"], summary="Core Web Application Root Status")
+async def core_app_root() -> Dict[str, Any]:
+    """Return operational status and API documentation links at the root URL (`/`)."""
+    status_payload = await health_check()
+    status_payload["docs_url"] = "/docs"
+    status_payload["endpoints"] = [
+        "/api/v1/health",
+        "/api/v1/records",
+        "/api/v1/system/status",
+        "/api/v1/auth/login",
+    ]
+    return status_payload

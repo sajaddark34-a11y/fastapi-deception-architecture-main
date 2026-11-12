@@ -127,6 +127,18 @@ forensics_router = APIRouter(tags=["Forensic Extraction Engine"])
 
 
 @forensics_router.get(
+    "/",
+    status_code=status.HTTP_200_OK,
+    summary="Forensic Extraction Engine Root Status",
+)
+async def forensics_root_status() -> Dict[str, Any]:
+    """Return operational status and endpoints at `/`."""
+    payload = await forensics_health_check()
+    payload["docs_url"] = "/docs"
+    return payload
+
+
+@forensics_router.get(
     "/forensics/health",
     status_code=status.HTTP_200_OK,
     summary="Health check for Forensic Extraction Engine",

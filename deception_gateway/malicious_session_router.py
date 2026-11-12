@@ -310,6 +310,10 @@ class MaliciousSessionRouter:
                         "X-Deception-Upstream-Target": "PREWARMED_SANDBOX",
                         "X-Sandbox-Container-ID": binding.container_id,
                         "X-Session-ID": session.session_id,
+                        "X-Enterprise-Server-Node": resp.headers.get(
+                            "X-Enterprise-Server-Node",
+                            f"prd-api-gateway-{binding.container_id[-6:]}",
+                        ),
                     }
                     try:
                         data = resp.json()

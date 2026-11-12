@@ -53,13 +53,13 @@ if exist ".venv\Scripts\python.exe" (
     set "PYTHON_CMD=.venv\Scripts\python.exe"
 )
 
-%PYTHON_CMD% -c "import fastapi, uvicorn, pydantic, sqlalchemy, httpx, redis" >nul 2>&1
+%PYTHON_CMD% -c "import fastapi, uvicorn, pydantic, sqlalchemy, httpx, redis, asyncpg, aiosqlite, fakeredis" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo         Installing missing dependencies from requirements.txt...
     %PYTHON_CMD% -m pip install --upgrade pip
     %PYTHON_CMD% -m pip install -r requirements.txt
 ) else (
-    echo         All required Python packages [FastAPI, Uvicorn, Pydantic, SQLAlchemy, Httpx, Redis] are ready.
+    echo         All required Python packages [FastAPI, Uvicorn, Pydantic, SQLAlchemy, AsyncPG, Httpx, Redis, FakeRedis] are ready.
 )
 
 echo.
@@ -67,7 +67,7 @@ echo [STEP 3/5] Checking Environment Configuration [.env]...
 if not exist ".env" (
     echo         Creating default .env configuration file...
     echo SERVICE_NAME=deception_gateway> ".env"
-    echo BIND_HOST=127.0.0.1>> ".env"
+    echo BIND_HOST=0.0.0.0>> ".env"
     echo GATEWAY_PORT=8000>> ".env"
     echo CORE_APP_PORT=8001>> ".env"
     echo DECOY_SERVICE_PORT=8080>> ".env"

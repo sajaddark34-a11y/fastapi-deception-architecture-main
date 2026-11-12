@@ -247,7 +247,7 @@ class TelemetryChartView:
         alerts = await self.alerts_stream.get_recent_alerts(limit=10)
 
         alert_rows_html = "".join(
-            f"<tr>"
+            f"<tr data-alert-id='{a.alert_id}'>"
             f"<td><span class='badge badge-{a.severity.value.lower()}'>{a.severity.value}</span></td>"
             f"<td>{a.category.value}</td>"
             f"<td><code>{a.source_ip}</code></td>"
@@ -256,7 +256,7 @@ class TelemetryChartView:
             f"<td>{a.action_taken}</td>"
             f"</tr>"
             for a in alerts
-        ) or "<tr><td colspan='6'>No active alerts in stream buffer.</td></tr>"
+        ) or "<tr id='empty-alerts-row'><td colspan='6'>No active alerts in stream buffer.</td></tr>"
 
         mitre_cards_html = "".join(
             f"<div class='mitre-card'>"
@@ -324,6 +324,8 @@ class TelemetryChartView:
         .badge {{ padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; }}
         .badge-critical {{ background: rgba(239,68,68,0.2); color: #ef4444; }}
         .badge-high {{ background: rgba(245,158,11,0.2); color: #f59e0b; }}
+        .badge-medium {{ background: rgba(6,182,212,0.2); color: #06b6d4; }}
+        .badge-low {{ background: rgba(16,185,129,0.2); color: #10b981; }}
         .mitre-grid {{ display: flex; gap: 12px; flex-wrap: wrap; }}
         .mitre-card {{
             background: #0b1325;
@@ -333,6 +335,11 @@ class TelemetryChartView:
             min-width: 200px;
         }}
         .mitre-id {{ color: var(--accent-cyan); font-weight: 700; }}
+        @keyframes flashRow {{
+            0% {{ background-color: rgba(239, 68, 68, 0.35); }}
+            100% {{ background-color: transparent; }}
+        }}
+        .live-new-row {{ animation: flashRow 1.8s ease-out; }}
     </style>
 </head>
 <body>
@@ -341,26 +348,28 @@ class TelemetryChartView:
             <h1>DEFENDER SOC COMMAND CENTER</h1>
             <p style="color:var(--text-muted);margin:0;">FastAPI-Driven Active Cyber Deception, Dynamic Containment & DFIR Pipeline</p>
         </div>
-        <div>
+        <div style="display:flex;gap:10px;align-items:center;">
+            <button id="reset-dashboard-btn" style="background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid #ef4444;padding:5px 12px;border-radius:4px;font-weight:700;font-size:11px;cursor:pointer;">RESET DASHBOARD</button>
+            <span id="ws-status-badge" class="badge" style="background:rgba(6,182,212,0.2);color:#06b6d4;">LIVE WS: CONNECTING...</span>
             <span class="badge" style="background:rgba(16,185,129,0.2);color:#10b981;">CHAIN-OF-CUSTODY: HMAC-SHA256 VERIFIED</span>
         </div>
     </header>
     <section class="kpi-grid">
         <div class="kpi-card">
             <div>ACTIVE TRAPPED SESSIONS</div>
-            <div class="kpi-value">{kpi['active_trapped_sessions_count']}</div>
+            <div class="kpi-value" id="kpi-trapped-sessions">{kpi['active_trapped_sessions_count']}</div>
         </div>
         <div class="kpi-card">
             <div>SECURITY ALERTS EMITTED</div>
-            <div class="kpi-value">{kpi['attack_timeline_metrics']['total_alerts']}</div>
+            <div class="kpi-value" id="kpi-total-alerts">{kpi['attack_timeline_metrics']['total_alerts']}</div>
         </div>
         <div class="kpi-card">
             <div>COMMANDS CAPTURED IN SANDBOX</div>
-            <div class="kpi-value">{kpi['attack_timeline_metrics']['total_commands_captured']}</div>
+            <div class="kpi-value" id="kpi-total-commands">{kpi['attack_timeline_metrics']['total_commands_captured']}</div>
         </div>
         <div class="kpi-card">
             <div>PREWARMED HONEY CONTAINERS</div>
-            <div class="kpi-value">{kpi['sandbox_pool_metrics']['available_warm_containers_count']}</div>
+            <div class="kpi-value" id="kpi-warm-containers">{kpi['sandbox_pool_metrics']['available_warm_containers_count']}</div>
         </div>
     </section>
     <section class="panel">
@@ -374,8 +383,116 @@ class TelemetryChartView:
     </section>
     <section class="panel">
         <h2>MITRE ATT&amp;CK Threat Intelligence Matrix</h2>
-        <div class="mitre-grid">{mitre_cards_html}</div>
+        <div class="mitre-grid" id="mitre-grid">{mitre_cards_html}</div>
     </section>
+    <script>
+        (function() {{
+            const tbody = document.getElementById('alerts-tbody');
+            const wsBadge = document.getElementById('ws-status-badge');
+            const seenAlertIds = new Set();
+            document.querySelectorAll('#alerts-tbody tr[data-alert-id]').forEach(tr => {{
+                seenAlertIds.add(tr.getAttribute('data-alert-id'));
+            }});
+
+            async function refreshKpiAndMitre() {{
+                try {{
+                    const [kpiRes, mitreRes] = await Promise.all([
+                        fetch('/api/v1/soc/visualizations/kpi'),
+                        fetch('/api/v1/soc/visualizations/mitre-matrix')
+                    ]);
+                    if (kpiRes.ok) {{
+                        const kpiData = await kpiRes.json();
+                        document.getElementById('kpi-trapped-sessions').textContent = kpiData.active_trapped_sessions_count;
+                        document.getElementById('kpi-total-alerts').textContent = kpiData.attack_timeline_metrics.total_alerts;
+                        document.getElementById('kpi-total-commands').textContent = kpiData.attack_timeline_metrics.total_commands_captured;
+                        document.getElementById('kpi-warm-containers').textContent = kpiData.sandbox_pool_metrics.available_warm_containers_count;
+                    }}
+                    if (mitreRes.ok) {{
+                        const mitreData = await mitreRes.json();
+                        const matrix = mitreData.techniques_matrix || [];
+                        if (matrix.length > 0) {{
+                            document.getElementById('mitre-grid').innerHTML = matrix.map(t =>
+                                `<div class="mitre-card">` +
+                                `<div class="mitre-id">${{t.technique_id}}</div>` +
+                                `<div class="mitre-name">${{t.technique_name}}</div>` +
+                                `<div class="mitre-tactic">${{t.tactic}} | Hits: ${{t.observed_count}}</div>` +
+                                `</div>`
+                            ).join('');
+                        }} else {{
+                            document.getElementById('mitre-grid').innerHTML = "<div class='mitre-card'>No MITRE techniques observed yet.</div>";
+                        }}
+                    }}
+                }} catch (e) {{}}
+            }}
+
+            document.getElementById('reset-dashboard-btn').addEventListener('click', async function() {{
+                const btn = this;
+                btn.textContent = 'RESETTING...';
+                seenAlertIds.clear();
+                document.getElementById('kpi-trapped-sessions').textContent = '0';
+                document.getElementById('kpi-total-alerts').textContent = '0';
+                document.getElementById('kpi-total-commands').textContent = '0';
+                tbody.innerHTML = "<tr id='empty-alerts-row'><td colspan='6'>No alerts emitted yet.</td></tr>";
+                document.getElementById('mitre-grid').innerHTML = "<div class='mitre-card'>No MITRE techniques observed yet.</div>";
+                try {{
+                    await fetch('/api/v1/reset-telemetry', {{ method: 'POST' }});
+                }} finally {{
+                    btn.textContent = 'RESET DASHBOARD';
+                }}
+            }});
+
+            function appendAlertRow(alert) {{
+                if (!alert || !alert.alert_id || seenAlertIds.has(alert.alert_id)) return;
+                seenAlertIds.add(alert.alert_id);
+                const emptyRow = document.getElementById('empty-alerts-row');
+                if (emptyRow) emptyRow.remove();
+
+                const sev = (alert.severity || 'HIGH').toUpperCase();
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-alert-id', alert.alert_id);
+                tr.className = 'live-new-row';
+                const sidShort = (alert.session_id || '').slice(0, 12) + '...';
+                tr.innerHTML =
+                    `<td><span class="badge badge-${{sev.toLowerCase()}}">${{sev}}</span></td>` +
+                    `<td>${{alert.category || ''}}</td>` +
+                    `<td><code>${{alert.source_ip || ''}}</code></td>` +
+                    `<td><code>${{sidShort}}</code></td>` +
+                    `<td><code>${{alert.http_method || 'GET'}} ${{alert.target_endpoint || '/'}}</code></td>` +
+                    `<td>${{alert.action_taken || ''}}</td>`;
+                tbody.insertBefore(tr, tbody.firstChild);
+                while (tbody.children.length > 25) {{
+                    tbody.removeChild(tbody.lastChild);
+                }}
+                refreshKpiAndMitre();
+            }}
+
+            function connectWebSocket() {{
+                const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${{proto}}//${{window.location.host}}/api/v1/soc/visualizations/alerts/ws`;
+                const ws = new WebSocket(wsUrl);
+                ws.onopen = function() {{
+                    wsBadge.textContent = 'LIVE WS: CONNECTED';
+                    wsBadge.style.background = 'rgba(16,185,129,0.2)';
+                    wsBadge.style.color = '#10b981';
+                }};
+                ws.onmessage = function(event) {{
+                    try {{
+                        const data = JSON.parse(event.data);
+                        appendAlertRow(data);
+                    }} catch (err) {{}}
+                }};
+                ws.onclose = function() {{
+                    wsBadge.textContent = 'LIVE WS: RECONNECTING...';
+                    wsBadge.style.background = 'rgba(245,158,11,0.2)';
+                    wsBadge.style.color = '#f59e0b';
+                    setTimeout(connectWebSocket, 1500);
+                }};
+            }}
+
+            connectWebSocket();
+            setInterval(refreshKpiAndMitre, 3000);
+        }})();
+    </script>
 </body>
 </html>"""
 

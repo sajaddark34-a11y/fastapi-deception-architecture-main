@@ -157,7 +157,19 @@ class SecurityAlertContract(BaseModel):
     @classmethod
     def validate_http_method(cls, value: str) -> str:
         """Normalize and validate the HTTP method."""
-        allowed_methods = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"}
+        allowed_methods = {
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS",
+            "TRACE",
+            "CONNECT",
+            "TCP_SYN",
+            "TCP_L4",
+        }
         method_upper = value.strip().upper()
         if method_upper not in allowed_methods:
             raise ValueError(f"Invalid HTTP method '{value}'. Expected one of {sorted(allowed_methods)}.")

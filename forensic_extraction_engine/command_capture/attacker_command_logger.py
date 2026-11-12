@@ -125,6 +125,12 @@ _MITRE_RULES = [
         "Exploit Public-Facing Application",
         "Initial Access",
     ),
+    (
+        re.compile(r"\b(nmap|masscan|zgrab|portscan|tcp_l4_scan|service_probe)\b", re.I),
+        "T1046",
+        "Network Service Discovery (Port & Service Scan)",
+        "Discovery",
+    ),
 ]
 
 

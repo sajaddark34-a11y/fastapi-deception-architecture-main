@@ -11,9 +11,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared_contracts.session_schema import (
     RoutingTargetEnum,
@@ -30,6 +31,24 @@ except ImportError:  # pragma: no cover
 
     class RedisError(Exception):  # type: ignore[no-redef]
         """Fallback exception when redis package is unavailable."""
+
+try:
+    import fakeredis
+    import fakeredis.aioredis as fake_aioredis
+
+    _SHARED_FAKE_REDIS_SERVER = fakeredis.FakeServer()
+except ImportError:  # pragma: no cover
+    fake_aioredis = None  # type: ignore[assignment]
+    _SHARED_FAKE_REDIS_SERVER = None
+
+
+def _is_redis_tcp_open(host: str, port: int, timeout: float = 0.2) -> bool:
+    """Return True if a TCP server is listening on `host:port`."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
 
 
 logger = logging.getLogger(__name__)
@@ -76,30 +95,46 @@ class SessionStateStore:
         self._mem_malicious_ids: Set[str] = set()
 
     async def _get_client(self) -> Optional["aioredis.Redis"]:
-        """Return an active Redis async client or switch to in-memory fallback if unreachable."""
+        """Return an active Redis async client (or embedded FakeRedis server when external Redis is offline)."""
         if self._use_memory_fallback or aioredis is None:
             return None
 
         if self._redis_client is None:
-            try:
-                client = aioredis.from_url(
-                    self._redis_url,
-                    encoding="utf-8",
-                    decode_responses=True,
-                    socket_connect_timeout=1.5,
-                    socket_timeout=1.5,
-                )
-                await client.ping()
-                self._redis_client = client
-            except Exception as exc:
-                logger.warning(
-                    "Redis unreachable at %s (%s). Switching SessionStateStore to in-memory fallback.",
-                    self._redis_url,
-                    exc,
-                )
-                self._use_memory_fallback = True
-                self._redis_client = None
-                return None
+            host = os.getenv("REDIS_HOST", "127.0.0.1")
+            port = int(os.getenv("REDIS_PORT", "6379"))
+            if _is_redis_tcp_open(host, port):
+                try:
+                    client = aioredis.from_url(
+                        self._redis_url,
+                        encoding="utf-8",
+                        decode_responses=True,
+                        socket_connect_timeout=1.0,
+                        socket_timeout=1.0,
+                    )
+                    await client.ping()
+                    self._redis_client = client
+                    return self._redis_client
+                except Exception:
+                    pass
+
+            if fake_aioredis is not None and _SHARED_FAKE_REDIS_SERVER is not None:
+                try:
+                    client = fake_aioredis.FakeRedis(
+                        server=_SHARED_FAKE_REDIS_SERVER,
+                        decode_responses=True,
+                    )
+                    await client.ping()
+                    self._redis_client = client
+                    logger.info(
+                        "SessionStateStore connected to embedded async Redis engine (FakeRedis)."
+                    )
+                    return self._redis_client
+                except Exception:
+                    pass
+
+            self._use_memory_fallback = True
+            self._redis_client = None
+            return None
 
         return self._redis_client
 

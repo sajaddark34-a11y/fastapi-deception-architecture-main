@@ -11,17 +11,23 @@ and unauthorized sensitive path probing (`/.env`, `/.git`). Automatically emits
 
 from __future__ import annotations
 
+import hashlib
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Mapping, Optional
+from typing import Dict, Mapping, Optional, Tuple
 
 from data_storage.postgresql_store import (
     ForensicLogsRepository,
     forensic_logs_repository,
 )
-from data_storage.redis_store import FastAlertsStream, fast_alerts_stream
+from data_storage.redis_store import (
+    FastAlertsStream,
+    fast_alerts_stream,
+    session_state_store,
+)
 from honey_token_injector import (
     HoneyTokenValidator,
     honey_token_validator,
@@ -35,6 +41,11 @@ from shared_contracts.honey_token_schema import HoneyTokenValidationContract
 
 _SCANNER_UA_REGEX = re.compile(
     r"(sqlmap|nikto|nuclei|nmap|masscan|dirbuster|gobuster|wfuzz|acunetix|nessus|zgrab|burpsuite|hydra|metasploit)",
+    re.IGNORECASE,
+)
+
+_NMAP_SERVICE_PROBE_REGEX = re.compile(
+    r"(/nice%20ports|tri%6eity\.txt|trinity\.txt|/nmaplowercheck|/evox/about|/hnap1|/sdk\b|/gponform|rtsp/1\.0|sip/2\.0)",
     re.IGNORECASE,
 )
 
@@ -83,6 +94,7 @@ class AttackDetector:
         self.validator: HoneyTokenValidator = validator or honey_token_validator
         self.alerts_stream: FastAlertsStream = alerts_stream or fast_alerts_stream
         self.logs_repo: ForensicLogsRepository = logs_repo or forensic_logs_repository
+        self._l4_scan_dedup: Dict[Tuple[str, int, str], float] = {}
 
     async def _emit_security_alert(
         self,
@@ -200,10 +212,15 @@ class AttackDetector:
         query_blob = "&".join(f"{k}={v}" for k, v in qry_dict.items())
         combined_payload = f"{norm_path} {query_blob} {body_text}"
 
-        # 2. Automated Scanner Fingerprinting
+        # 2. Automated Scanner Fingerprinting (User-Agent + Nmap Service Probes)
         scanner_match = _SCANNER_UA_REGEX.search(user_agent)
-        if scanner_match:
-            scanner_name = scanner_match.group(1)
+        nmap_probe_match = _NMAP_SERVICE_PROBE_REGEX.search(combined_payload)
+        if scanner_match or nmap_probe_match:
+            scanner_name = (
+                scanner_match.group(1)
+                if scanner_match
+                else f"nmap-service-probe ({nmap_probe_match.group(0)})"
+            )
             summary = (
                 f"Automated vulnerability scanner '{scanner_name}' detected from {safe_ip} "
                 f"probing {norm_method} {norm_path}; session isolated in honey sandbox."
@@ -311,3 +328,99 @@ class AttackDetector:
             token_validation=token_result,
             reason="Legitimate traffic verified",
         )
+
+    async def inspect_tcp_l4_scan(
+        self,
+        client_ip: str,
+        client_port: int,
+        destination_port: int,
+        raw_probe_bytes: bytes = b"",
+        scan_type: str = "TCP_L4_PORT_SCAN",
+    ) -> Optional[SecurityAlertContract]:
+        """
+        Intercept, log, and forward raw Layer-4 TCP port scan / service enumeration
+        probes (e.g. `nmap -sS`, `nmap -sT`, `nmap -sV`) to `ForensicExtractionEngine`
+        and broadcast a real-time `SecurityAlertContract` to the SOC Dashboard.
+        """
+        safe_ip = (client_ip or "127.0.0.1").strip()
+        now_mono = time.monotonic()
+        dedup_key = (safe_ip, int(destination_port), scan_type)
+        last_seen = self._l4_scan_dedup.get(dedup_key, 0.0)
+        if now_mono - last_seen < 1.5:
+            return None
+        self._l4_scan_dedup[dedup_key] = now_mono
+
+        existing_sess = await session_state_store.get_session_by_ip(safe_ip)
+        session_id = (
+            existing_sess.session_id
+            if existing_sess is not None
+            else f"l4_scan_{hashlib.sha256(f'{safe_ip}:{destination_port}'.encode()).hexdigest()[:16]}"
+        )
+        container_id = f"honey_sbx_{hashlib.sha256(session_id.encode()).hexdigest()[:12]}"
+
+        await session_state_store.escalate_session_to_malicious(
+            session_id=session_id,
+            triggered_token_id=None,
+            assigned_container_id=container_id,
+            risk_score=100.0,
+        )
+
+        probe_preview = (
+            raw_probe_bytes[:96].decode("utf-8", errors="replace").strip()
+            if raw_probe_bytes
+            else "SYN/ACK -> RST/FIN (0-byte L4 port probe)"
+        )
+        summary = (
+            f"Raw Layer-4 TCP Scan ({scan_type}) intercepted from {safe_ip}:{client_port} "
+            f"targeting port {destination_port} [probe: {probe_preview[:64]}]; "
+            f"forwarded to Forensic Extraction Engine."
+        )
+        alert = await self._emit_security_alert(
+            severity=AlertSeverityEnum.HIGH,
+            category=AttackCategoryEnum.AUTOMATED_SCANNER_PROBE,
+            source_ip=safe_ip,
+            session_id=session_id,
+            target_endpoint=f"/tcp-l4/port-{destination_port}",
+            http_method="TCP_SYN",
+            summary_message=summary,
+            headers_snapshot={
+                "X-Layer4-Scan-Type": scan_type,
+                "X-Source-Port": str(client_port),
+                "X-Destination-Port": str(destination_port),
+                "X-Raw-Probe-Bytes": str(len(raw_probe_bytes)),
+            },
+            action_taken="L4_SCAN_LOGGED_AND_PINNED_TO_SANDBOX",
+        )
+
+        try:
+            from forensic_extraction_engine.engine_service import (
+                forensic_engine_service,
+            )
+
+            await forensic_engine_service.process_sandbox_interaction(
+                {
+                    "session_id": session_id,
+                    "client_ip": safe_ip,
+                    "container_id": container_id,
+                    "container_ip": "172.29.0.15",
+                    "container_port": int(destination_port),
+                    "request_method": "TCP_SYN",
+                    "request_path": f"/tcp-l4/port-{destination_port}",
+                    "headers": {
+                        "X-Layer4-Scan-Type": scan_type,
+                        "X-Source-Port": str(client_port),
+                        "X-Destination-Port": str(destination_port),
+                    },
+                    "body_text": f"nmap tcp_l4_scan {scan_type} port {destination_port} ({probe_preview[:80]})",
+                    "shell_result": {
+                        "command_line": f"nmap tcp_l4_scan {scan_type} port {destination_port} ({probe_preview[:80]})",
+                        "working_directory": "/network/l4-perimeter",
+                        "executed_by_user": "remote-scanner",
+                        "exit_code": 0,
+                    },
+                }
+            )
+        except Exception:
+            pass
+
+        return alert

@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 try:
@@ -68,10 +70,20 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
+def _is_tcp_reachable(host: str, port: int, timeout: float = 0.25) -> bool:
+    """Return True if `host:port` accepts a TCP connection."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 def build_core_database_url() -> str:
     """
     Construct the asynchronous PostgreSQL database connection URL for `core_web_app`
-    aligned with `docker-compose.yml` environment variables.
+    aligned with `docker-compose.yml` environment variables, with automatic
+    `sqlite+aiosqlite` fallback when an external PostgreSQL server is offline.
     """
     explicit_url = os.getenv("CORE_DATABASE_URL") or os.getenv("DATABASE_URL")
     if explicit_url:
@@ -79,10 +91,22 @@ def build_core_database_url() -> str:
 
     pg_user = os.getenv("POSTGRES_USER", "deception_admin")
     pg_password = os.getenv("POSTGRES_PASSWORD", "deception_sec_pass_2026")
-    pg_host = os.getenv("POSTGRES_HOST", "postgresql_store")
+    pg_host = os.getenv("POSTGRES_HOST", "127.0.0.1")
     pg_port = os.getenv("POSTGRES_PORT", "5432")
     pg_db = os.getenv("POSTGRES_DB", "deception_forensics_db")
-    return f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+
+    if _is_tcp_reachable(pg_host, int(pg_port)):
+        return f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+
+    try:
+        import aiosqlite  # noqa: F401
+
+        sqlite_dir = Path(__file__).resolve().parents[2] / "artifacts_vault"
+        sqlite_dir.mkdir(parents=True, exist_ok=True)
+        sqlite_path = (sqlite_dir / "core_web_app.db").as_posix()
+        return f"sqlite+aiosqlite:///{sqlite_path}"
+    except ImportError:
+        return f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
 
 
 CORE_DATABASE_URL: str = build_core_database_url()

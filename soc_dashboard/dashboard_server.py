@@ -136,6 +136,61 @@ async def soc_dashboard_metrics() -> Dict[str, Any]:
     }
 
 
+@dashboard_core_router.post("/api/v1/reset-telemetry")
+async def reset_soc_telemetry() -> Dict[str, Any]:
+    """
+    Safely flush Redis telemetry streams/session keys and reset historical
+    counter tables to zero without breaking active Redis or WebSocket connections.
+    """
+    from sqlalchemy import delete
+    from data_storage.postgresql_store import (
+        AttackerCommandLogORM,
+        ForensicSessionLocal,
+        NetworkTelemetryLogORM,
+        SecurityAlertLogORM,
+        forensic_logs_repository,
+    )
+
+    # 1. Flush Redis Streams & Session Keys on the existing connection without closing it
+    redis_client = await fast_alerts_stream._get_client()
+    if redis_client is not None:
+        await redis_client.flushdb()
+    await fast_alerts_stream.ensure_consumer_group()
+
+    # 2. Clear in-memory stream and session fallback buffers
+    fast_alerts_stream._mem_alerts.clear()
+    fast_alerts_stream._mem_telemetry.clear()
+    session_state_store._mem_sessions.clear()
+    session_state_store._mem_bindings.clear()
+    session_state_store._mem_malicious_ids.clear()
+
+    # 3. Reset persisted KPI counter tables & MITRE cache so polling stays at 0
+    from deception_gateway.gateway_router import attack_detector
+
+    getattr(attack_detector, "_l4_probe_dedup_cache", {}).clear()
+    forensic_logs_repository._mem_alerts.clear()
+    forensic_logs_repository._mem_commands.clear()
+    forensic_logs_repository._mem_network.clear()
+    telemetry_chart_view.forensic_collector.command_logger._session_mitre_map.clear()
+    telemetry_chart_view.forensic_collector.command_logger._analysis_by_event_id.clear()
+    if ForensicSessionLocal is not None:
+        async with ForensicSessionLocal() as db:
+            await db.execute(delete(SecurityAlertLogORM))
+            await db.execute(delete(AttackerCommandLogORM))
+            await db.execute(delete(NetworkTelemetryLogORM))
+            await db.commit()
+
+    return {
+        "status": "reset_complete",
+        "counters": {
+            "active_trapped_sessions": 0,
+            "security_alerts_emitted": 0,
+            "commands_captured": 0,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 app.include_router(dashboard_core_router)
 app.include_router(visualization_router)
 app.include_router(report_export_router)
