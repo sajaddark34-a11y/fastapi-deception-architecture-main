@@ -12,14 +12,17 @@ Provides the unified FastAPI application for the Security Operations Center (SOC
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict
 
 try:
-    from fastapi import APIRouter, FastAPI
+    from fastapi import APIRouter, FastAPI, Form, Request, status
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.templating import Jinja2Templates
 except ImportError:  # pragma: no cover
     from core_web_app.authentication.auth_routes import APIRouter
     from core_web_app.main import FastAPI
@@ -33,6 +36,15 @@ except ImportError:  # pragma: no cover
             self.content = content
             self.status_code = status_code
             self.body = content.encode("utf-8")
+
+    class RedirectResponse:  # type: ignore[no-redef]
+        def __init__(self, url: str, status_code: int = 303) -> None:
+            self.url = url
+            self.status_code = status_code
+
+    class Jinja2Templates:  # type: ignore[no-redef]
+        def __init__(self, directory: str) -> None:
+            self.directory = directory
 
 
 from data_storage.postgresql_store import (
@@ -189,6 +201,71 @@ async def reset_soc_telemetry() -> Dict[str, Any]:
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+@dashboard_core_router.get("/login", response_class=HTMLResponse)
+async def get_honeypot_login(request: Request):
+    """Serve the decoy corporate login portal to trap web crawlers/adversaries."""
+    return templates.TemplateResponse(
+        request=request,
+        name="fake_login.html",
+        context={"error": None},
+    )
+
+
+@dashboard_core_router.post("/login")
+async def post_honeypot_login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    """
+    Inspect login credentials:
+    - Legitimate admin credentials -> Redirect to SOC dashboard route (/admin/soc).
+    - Attacker credentials -> Log SOC alert, harvest payload, and maintain deception.
+    """
+    if username == "sajad_admin" and password == "Soc@2026":
+        return RedirectResponse(url="/admin/soc", status_code=status.HTTP_303_SEE_OTHER)
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+
+    soc_alert: Dict[str, Any] = {
+        "event_type": "WEB_HONEYPOT_CREDENTIAL_HARVEST",
+        "severity": "HIGH",
+        "source_ip": client_ip,
+        "captured_username": username,
+        "captured_password": password,
+        "target_endpoint": "/login",
+        "user_agent": request.headers.get("user-agent", "Unknown"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "action_taken": "CREDENTIALS_HARVESTED_DECEPTION_MAINTAINED",
+    }
+
+    # TODO: Insert Redis Logging here
+    # Example:
+    # await redis_client.xadd("deception:streams:alerts", {"payload": json.dumps(soc_alert)})
+    # or:
+    # await fast_alerts_stream.publish_alert(soc_alert)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="fake_login.html",
+        context={"error": "Invalid credentials. Incident logged."},
+        status_code=status.HTTP_200_OK,
+    )
+
+
+@dashboard_core_router.get("/admin/soc", response_class=HTMLResponse)
+async def admin_soc_dashboard(request: Request):
+    """Authenticated entry point redirecting to the Defender SOC Command Center."""
+    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
 
 app.include_router(dashboard_core_router)

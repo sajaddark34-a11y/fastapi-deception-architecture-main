@@ -269,8 +269,9 @@ async def run_all_layers() -> None:
         if os.getenv("AUTO_OPEN_BROWSER", "true").lower() in ("0", "false", "no"):
             return
         try:
-            # Open Layer 4 SOC Command Center Dashboard GUI and Layer 1 Gateway Swagger UI
+            # Open Layer 4 SOC Command Center Dashboard GUI, Decoy Login Portal, and Gateway Swagger UI
             webbrowser.open(f"http://{check_host}:{soc_port}")
+            webbrowser.open_new_tab(f"http://{check_host}:{soc_port}/login")
             webbrowser.open_new_tab(f"http://{check_host}:{gateway_port}/docs")
         except Exception:
             pass

@@ -53,13 +53,13 @@ if exist ".venv\Scripts\python.exe" (
     set "PYTHON_CMD=.venv\Scripts\python.exe"
 )
 
-%PYTHON_CMD% -c "import fastapi, uvicorn, pydantic, sqlalchemy, httpx, redis, asyncpg, aiosqlite, fakeredis" >nul 2>&1
+%PYTHON_CMD% -c "import fastapi, uvicorn, pydantic, sqlalchemy, httpx, redis, asyncpg, aiosqlite, fakeredis, jinja2" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo         Installing missing dependencies from requirements.txt...
     %PYTHON_CMD% -m pip install --upgrade pip
     %PYTHON_CMD% -m pip install -r requirements.txt
 ) else (
-    echo         All required Python packages [FastAPI, Uvicorn, Pydantic, SQLAlchemy, AsyncPG, Httpx, Redis, FakeRedis] are ready.
+    echo         All required Python packages [FastAPI, Uvicorn, Pydantic, SQLAlchemy, AsyncPG, Jinja2, Redis] are ready.
 )
 
 echo.
